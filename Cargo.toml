@@ -1,0 +1,53 @@
+[package]
+name = "modality-json-plugins"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jon Lamb <jon@auxon.io>"]
+description = "A Modality reflector plugin suite for CTF data"
+license = "Apache-2.0"
+repository = "https://github.com/auxoncorp/modality-ctf-plugins"
+
+[lib]
+name = "modality_json"
+path = "src/lib.rs"
+
+[[bin]]
+name = "modality-json-import"
+path = "src/bin/importer.rs"
+test = false
+
+[dependencies]
+modality-api = { git = "https://github.com/auxoncorp/modality-sdk", branch="hashable-attr-vals" }
+modality-ingest-client = { git = "https://github.com/auxoncorp/modality-sdk", branch="hashable-attr-vals" }
+modality-ingest-protocol = { git = "https://github.com/auxoncorp/modality-sdk", branch="hashable-attr-vals" }
+modality-reflector-config = { git = "https://github.com/auxoncorp/modality-sdk", branch="hashable-attr-vals" }
+
+serde = { version = "1.0", features=["derive"] }
+derive_more = "0.99"
+hex = "0.4"
+dirs = "4"
+socket2 = "0.4"
+exitcode = "1"
+clap = { version = "3.2", features = ["env", "color", "derive"] }
+thiserror = "1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "io-util", "net", "signal", "tracing"] }
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = { version = "2.2", features = ["serde"] }
+uuid = { version = "1.1.2", features = ["v5", "v4", "serde"] }
+ctrlc = { version = "3.2", features=["termination"] }
+
+# Upstreaming: https://github.com/serde-rs/json/pull/995
+serde_json = { git = "https://github.com/mullr/serde-json", branch = "parse_string_prefix" }
+
+regex = "1"
+itertools = "0.10.5"
+fxhash = "0.2.1"
+
+[dev-dependencies]
+pretty_assertions = "1.2"
+tempfile = "3.1"
+
+[profile.release]
+strip="debuginfo"
