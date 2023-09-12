@@ -1,7 +1,3 @@
-use derive_more::{Display, From, Into};
-use serde::Deserialize;
-use std::num::ParseIntError;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::sync::Arc;
 
@@ -26,26 +22,5 @@ impl Interruptor {
 impl Default for Interruptor {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[derive(
-    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, From, Into, Display,
-)]
-#[repr(transparent)]
-pub struct RetryDurationUs(pub u64);
-
-impl Default for RetryDurationUs {
-    fn default() -> Self {
-        // 100ms
-        RetryDurationUs(100000)
-    }
-}
-
-impl FromStr for RetryDurationUs {
-    type Err = ParseIntError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(RetryDurationUs(s.trim().parse::<u64>()?))
     }
 }

@@ -2,25 +2,25 @@
 name = "modality-json-plugins"
 version = "0.1.0"
 edition = "2021"
-authors = ["Jon Lamb <jon@auxon.io>"]
-description = "A Modality reflector plugin suite for CTF data"
+authors = ["Russell Mull <russell@auxon.io>", "Jon Lamb <jon@auxon.io>"]
+description = "A Modality reflector plugin suite for JSON data"
 license = "Apache-2.0"
-repository = "https://github.com/auxoncorp/modality-ctf-plugins"
+repository = "https://github.com/auxoncorp/modality-json-plugins"
 
 [lib]
 name = "modality_json"
 path = "src/lib.rs"
 
 [[bin]]
-name = "modality-json-import"
+name = "modality-json-importer"
 path = "src/bin/importer.rs"
 test = false
 
 [dependencies]
-modality-api = { git = "https://github.com/auxoncorp/modality-sdk", branch="hashable-attr-vals" }
-modality-ingest-client = { git = "https://github.com/auxoncorp/modality-sdk", branch="hashable-attr-vals" }
-modality-ingest-protocol = { git = "https://github.com/auxoncorp/modality-sdk", branch="hashable-attr-vals" }
-modality-reflector-config = { git = "https://github.com/auxoncorp/modality-sdk", branch="hashable-attr-vals" }
+modality-api = "0.2"
+modality-ingest-client = "0.3"
+modality-ingest-protocol = "0.2"
+modality-reflector-config = "0.3"
 
 serde = { version = "1.0", features=["derive"] }
 derive_more = "0.99"

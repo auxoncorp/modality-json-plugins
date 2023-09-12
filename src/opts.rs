@@ -48,4 +48,12 @@ pub struct ReflectorOpts {
     /// Use the provided UUID as the run ID instead of generating a random one
     #[clap(long, name = "run-uuid", help_heading = "REFLECTOR CONFIGURATION")]
     pub run_id: Option<Uuid>,
+
+    /// Ingest client connection timeout seconds (default 1)
+    #[clap(
+        long,
+        name = "timeout-seconds",
+        help_heading = "REFLECTOR CONFIGURATION"
+    )]
+    pub timeout_seconds: Option<u64>,
 }

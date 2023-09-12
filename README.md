@@ -1,6 +1,6 @@
-# modality-json-plugins
+# modality-json-plugins &emsp; ![ci]
 
-A [Modality][modality] reflector plugin suite and ingest adapter library for [CTF][ctf] data.
+A [Modality][modality] reflector plugin suite and ingest adapter library for JSON data.
 
 ## LICENSE
 
@@ -20,8 +20,5 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-[ci]: https://github.com/auxoncorp/modality-ctf-plugins/workflows/CI/badge.svg
-[ctf]: https://diamon.org/ctf/
+[ci]: https://github.com/auxoncorp/modality-json-plugins/workflows/CI/badge.svg
 [modality]: https://auxon.io/products/modality
-[lttng-live-docs]: https://babeltrace.org/docs/v2.0/man7/babeltrace2-source.ctf.lttng-live.7/
-[ctf-fs-docs]: https://babeltrace.org/docs/v2.0/man7/babeltrace2-source.ctf.fs.7/

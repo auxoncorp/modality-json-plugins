@@ -1,6 +1,3 @@
-#![deny(warnings, clippy::all)]
-#![allow(unused)]
-
 use clap::Parser;
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -11,15 +8,13 @@ use modality_json::config::{AttrKeyRename, TimestampUnit};
 use modality_json::{prelude::*, tracing::try_init_tracing_subscriber};
 use regex::Regex;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::fs::File;
-use std::io::BufReader;
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::collections::HashMap;
+use std::{path::PathBuf, time::Duration};
 use thiserror::Error;
 use tracing::{error, warn};
+use uuid::Uuid;
 
-/// Import CTF trace data from files
+/// Import JSON data from files
 #[derive(Parser, Debug, Clone)]
 #[clap(version)]
 pub struct Opts {
@@ -195,6 +190,8 @@ async fn do_main() -> Result<(), Box<dyn std::error::Error>> {
         cfg.plugin.non_json_attrs = opts.non_json_attrs;
     }
 
+    let run_id = AttrVal::from(cfg.plugin.run_id.unwrap_or_else(Uuid::new_v4).to_string());
+
     let mut rename_timeline_attrs = opts.rename_timeline_attrs.clone();
     rename_timeline_attrs.extend(cfg.plugin.rename_timeline_attrs.clone());
 
@@ -211,7 +208,7 @@ async fn do_main() -> Result<(), Box<dyn std::error::Error>> {
         .plugin
         .non_json_regex
         .as_deref()
-        .map(|re_str| Regex::new(re_str))
+        .map(Regex::new)
         .transpose()?;
     let non_json_attrs = cfg
         .plugin
@@ -227,18 +224,19 @@ async fn do_main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let mut sent_tl_attrs : FxHashMap<(TimelineId, AttrKey), AttrVal> = Default::default();
-
-    let c =
-        IngestClient::connect(&cfg.protocol_parent_url()?, cfg.ingest.allow_insecure_tls).await?;
+    let c = IngestClient::connect_with_timeout(
+        &cfg.protocol_parent_url()?,
+        cfg.ingest.allow_insecure_tls,
+        Duration::from_secs(cfg.plugin.timeout_seconds.unwrap_or(1)),
+    )
+    .await?;
     let c_authed = c.authenticate(cfg.resolve_auth()?.into()).await?;
     let mut client = Client::new(c_authed, rename_timeline_attrs, rename_event_attrs);
 
-    
-    for p in cfg.plugin.import.inputs.iter() {
-        /// Use a single ordering counter for each input. This will
-        /// likely fail if we get the same timeline from two different
-        /// files... which is exactly what we want to happen.
+    'outer: for p in cfg.plugin.import.inputs.iter() {
+        // Use a single ordering counter for each input. This will
+        // likely fail if we get the same timeline from two different
+        // files... which is exactly what we want to happen.
         let mut ordering = 0u128;
 
         let buf = std::fs::read_to_string(p)?;
@@ -248,6 +246,10 @@ async fn do_main() -> Result<(), Box<dyn std::error::Error>> {
         let mut pending_json_vals = vec![];
 
         loop {
+            if interruptor.is_set() {
+                break 'outer;
+            }
+
             s = s.trim_start();
 
             match s.chars().next() {
@@ -273,9 +275,19 @@ async fn do_main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             if !pending_json_vals.is_empty() {
-                for val in (&pending_json_vals).into_iter() {
-                    let rts = prepare_json_object(val, &extra_kvs, &cfg.plugin, &mut known_timelines)?;
-                    client.send_event_on_timeline(rts.timeline_id, rts.timeline_kvs, ordering, rts.event_kvs);
+                for val in pending_json_vals.iter() {
+                    let mut rts =
+                        prepare_json_object(val, &extra_kvs, &cfg.plugin, &mut known_timelines)?;
+                    rts.timeline_kvs
+                        .push((AttrKey::new("run_id".into()), run_id.clone()));
+                    client
+                        .send_event_on_timeline(
+                            rts.timeline_id,
+                            rts.timeline_kvs,
+                            ordering,
+                            rts.event_kvs,
+                        )
+                        .await?;
                     ordering += 1;
                 }
 
@@ -298,9 +310,7 @@ fn json_from_str<'de, T: serde::Deserialize<'de>>(
     Ok((&s[str_read.index()..], value))
 }
 
-type JsonObject = serde_json::Map<String, serde_json::Value>;
-
-fn parse_array(mut s: &str) -> Result<(&str, Vec<serde_json::Value>), Box<dyn std::error::Error>> {
+fn parse_array(s: &str) -> Result<(&str, Vec<serde_json::Value>), Box<dyn std::error::Error>> {
     let (tail, json) = json_from_str::<serde_json::Value>(s)?;
     let Some(vals) = json.as_array() else {
         return Err("Expected JSON array".into());
@@ -314,7 +324,8 @@ fn parse_obj(s: &str) -> Result<(&str, serde_json::Value), Box<dyn std::error::E
     Ok((tail, json))
 }
 
-fn parse_regex_line<'a, 'k>(
+#[allow(clippy::type_complexity)]
+fn parse_regex_line<'a>(
     s: &'a str,
     re: Option<&Regex>,
     attrs: &[AttrKey],
@@ -333,7 +344,7 @@ fn parse_regex_line<'a, 'k>(
         .ok_or_else(|| format!("Non-json line did not match the supplied regex.\n{s}"))?;
 
     // the first capture is always the entire match
-    let mut caps = caps.iter().skip(1);
+    let caps = caps.iter().skip(1);
 
     for eob in attrs.iter().zip_longest(caps) {
         match eob {
@@ -372,7 +383,7 @@ fn string_to_attr_val(s: &str) -> AttrVal {
         return BigInt::new_attr_val(i);
     }
 
-    AttrVal::String(s.into())
+    AttrVal::String(s.to_string().into())
 }
 
 struct ReadyToSendEvent {
@@ -383,7 +394,7 @@ struct ReadyToSendEvent {
 
 fn prepare_json_object(
     val: &serde_json::Value,
-    extra_kvs: &Vec<(AttrKey, AttrVal)>,
+    extra_kvs: &[(AttrKey, AttrVal)],
     cfg: &PluginConfig,
     known_timelines: &mut HashMap<
         (AttrKey, AttrVal),
@@ -391,12 +402,12 @@ fn prepare_json_object(
         std::hash::BuildHasherDefault<fxhash::FxHasher>,
     >,
 ) -> Result<ReadyToSendEvent, Box<dyn std::error::Error>> {
-    let Some(obj) = val.as_object() else  {
+    let Some(obj) = val.as_object() else {
         return Err("Expected JSON object at top level, or in array.".into());
     };
 
-    let mut all_kvs = extra_kvs.clone();
-    walk_obj(&obj, |key_path, val| {
+    let mut all_kvs = extra_kvs.to_vec();
+    walk_obj(obj, |key_path, val| {
         let key = AttrKey::new(key_path.join("."));
         if let Some(val) = json_leaf_to_attr_val(val) {
             all_kvs.push((key, val));
@@ -406,9 +417,9 @@ fn prepare_json_object(
     let mut timeline_kvs = vec![];
     let mut event_kvs = vec![];
     for (key, val) in all_kvs.into_iter() {
-        if cfg.timeline_names.iter().any(|s| s == key.as_ref()) {
-            timeline_kvs.push((key, val));
-        } else if cfg.timeline_attrs.iter().any(|s| s == key.as_ref()) {
+        if cfg.timeline_names.iter().any(|s| s == key.as_ref())
+            || cfg.timeline_attrs.iter().any(|s| s == key.as_ref())
+        {
             timeline_kvs.push((key, val));
         } else {
             event_kvs.push((key, val));
@@ -416,10 +427,7 @@ fn prepare_json_object(
     }
 
     let mut timeline_name_sig = None;
-    let mut timeline_name = cfg
-        .timeline_name_prefix
-        .clone()
-        .unwrap_or_else(|| String::new());
+    let mut timeline_name = cfg.timeline_name_prefix.clone().unwrap_or_default();
 
     for name_key in cfg.timeline_names.iter() {
         if let Some((k, v)) = timeline_kvs.iter().find(|(k, _)| k.as_ref() == name_key) {
@@ -440,14 +448,11 @@ fn prepare_json_object(
 
     let timeline_id = known_timelines
         .entry(timeline_name_sig)
-        .or_insert_with(|| TimelineId::allocate());
+        .or_insert_with(TimelineId::allocate);
 
-    let mut event_name = cfg
-        .event_name_prefix
-        .clone()
-        .unwrap_or_else(|| String::new());
+    let mut event_name = cfg.event_name_prefix.clone().unwrap_or_default();
     for name_key in cfg.event_names.iter() {
-        if let Some((k, v)) = event_kvs.iter().find(|(k, _)| k.as_ref() == name_key) {
+        if let Some((_k, v)) = event_kvs.iter().find(|(k, _)| k.as_ref() == name_key) {
             event_name += &v.to_string();
             break;
         }
@@ -495,21 +500,8 @@ fn json_leaf_to_attr_val(val: &serde_json::Value) -> Option<AttrVal> {
                 unreachable!()
             }
         }
-        serde_json::Value::String(s) => Some(AttrVal::String(s.clone())),
+        serde_json::Value::String(s) => Some(AttrVal::String(s.clone().into())),
     }
-}
-
-fn get_val_at_path<'j>(
-    path: &str,
-    mut obj: &'j serde_json::Map<String, serde_json::Value>,
-) -> Option<&'j serde_json::Value> {
-    let mut parts = path.split(".").collect::<VecDeque<_>>();
-    while parts.len() > 1 {
-        let head = parts.pop_front().unwrap();
-        obj = obj.get(head)?.as_object()?;
-    }
-
-    obj.get(parts[0])
 }
 
 type JsonPath<'a> = Vec<Cow<'a, str>>;

@@ -26,6 +26,8 @@ pub struct JsonConfig {
 pub struct PluginConfig {
     pub run_id: Option<Uuid>,
 
+    pub timeout_seconds: Option<u64>,
+
     // TODO this is currently one-attr, with fallbacks. Should it instead be compound?
     /// The json path to the key that will be used to determine the
     /// name of an event. If given multiple times, the paths with be
@@ -91,11 +93,12 @@ pub struct ImportConfig {
     pub inputs: Vec<PathBuf>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum TimestampUnit {
     Seconds,
     Milliseconds,
     Microseconds,
+    #[default]
     Nanoseconds,
 }
 
@@ -122,12 +125,6 @@ impl TimestampUnit {
             TimestampUnit::Microseconds => 1_000.0,
             TimestampUnit::Nanoseconds => 1.0,
         }
-    }
-}
-
-impl Default for TimestampUnit {
-    fn default() -> Self {
-        TimestampUnit::Nanoseconds
     }
 }
 
@@ -177,8 +174,12 @@ impl JsonConfig {
 
         let mut plugin: PluginConfig =
             TomlValue::Table(cfg.metadata.into_iter().collect()).try_into()?;
+
         if let Some(run_id) = rf_opts.run_id {
             plugin.run_id = Some(run_id);
+        }
+        if let Some(timeout) = rf_opts.timeout_seconds {
+            plugin.timeout_seconds = Some(timeout);
         }
 
         Ok(Self {
@@ -199,182 +200,5 @@ impl JsonConfig {
 
     pub fn resolve_auth(&self) -> Result<AuthTokenBytes, AuthTokenError> {
         AuthTokenBytes::resolve(self.auth_token.as_deref())
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use modality_reflector_config::{AttrKeyEqValuePair, TimelineAttributes};
-    use pretty_assertions::assert_eq;
-    use std::str::FromStr;
-    use std::{env, fs::File, io::Write};
-
-    const IMPORT_CONFIG: &str = r#"[ingest]
-protocol-parent-url = 'modality-ingest://127.0.0.1:14182'
-additional-timeline-attributes = [
-    "ci_run=1",
-    "module='linux-import'",
-]
-
-[metadata]
-run-id = 'a1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d1'
-trace-uuid = 'a1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d2'
-log-level = 'info'
-trace-name = 'my-trace'
-clock-class-offset-ns = -1
-clock-class-offset-s = 2
-force-clock-class-origin-unix-epoch = true
-inputs = ['path/traces-a', 'path/traces-b']
-"#;
-
-    const LTTNG_LIVE_CONFIG: &str = r#"[ingest]
-protocol-parent-url = 'modality-ingest://127.0.0.1:14182'
-additional-timeline-attributes = [
-    "ci_run=1",
-    "module='linux-import'",
-]
-
-[metadata]
-run-id = 'a1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d1'
-trace-uuid = 'a1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d2'
-log-level = 'debug'
-retry-duration-us = 100
-session-not-found-action = 'end'
-url = 'net://localhost/host/ubuntu-focal/my-kernel-session'
-"#;
-
-    #[test]
-    fn import_cfg() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("my_config.toml");
-        {
-            let mut f = File::create(&path).unwrap();
-            f.write_all(IMPORT_CONFIG.as_bytes()).unwrap();
-            f.flush().unwrap();
-        }
-
-        let cfg = JsonConfig::load_merge_with_opts(
-            ReflectorOpts {
-                config_file: Some(path.to_path_buf()),
-                ..Default::default()
-            },
-            Default::default(),
-        )
-        .unwrap();
-
-        env::set_var(CONFIG_ENV_VAR, path);
-        let env_cfg =
-            JsonConfig::load_merge_with_opts(Default::default(), Default::default()).unwrap();
-        env::remove_var(CONFIG_ENV_VAR);
-        assert_eq!(cfg, env_cfg);
-
-        assert_eq!(
-            cfg,
-            JsonConfig {
-                auth_token: None,
-                ingest: TopLevelIngest {
-                    protocol_parent_url: Url::parse("modality-ingest://127.0.0.1:14182")
-                        .unwrap()
-                        .into(),
-                    allow_insecure_tls: false,
-                    protocol_child_port: None,
-                    timeline_attributes: TimelineAttributes {
-                        additional_timeline_attributes: vec![
-                            AttrKeyEqValuePair::from_str("ci_run=1").unwrap(),
-                            AttrKeyEqValuePair::from_str("module='linux-import'").unwrap(),
-                        ],
-                        override_timeline_attributes: Default::default(),
-                    },
-                    max_write_batch_staleness: None,
-                },
-                plugin: PluginConfig {
-                    run_id: Uuid::from_str("a1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d1")
-                        .unwrap()
-                        .into(),
-                    trace_uuid: Uuid::from_str("a1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d2")
-                        .unwrap()
-                        .into(),
-                    log_level: babeltrace2_sys::LoggingLevel::Info.into(),
-                    import: ImportConfig {
-                        trace_name: "my-trace".to_owned().into(),
-                        clock_class_offset_ns: Some(-1_i64),
-                        clock_class_offset_s: 2_i64.into(),
-                        force_clock_class_origin_unix_epoch: true.into(),
-                        inputs: vec![
-                            PathBuf::from("path/traces-a"),
-                            PathBuf::from("path/traces-b")
-                        ],
-                    },
-                    lttng_live: Default::default(),
-                }
-            }
-        );
-    }
-
-    #[test]
-    fn lttng_live_cfg() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("my_config.toml");
-        {
-            let mut f = File::create(&path).unwrap();
-            f.write_all(LTTNG_LIVE_CONFIG.as_bytes()).unwrap();
-            f.flush().unwrap();
-        }
-
-        let cfg = JsonConfig::load_merge_with_opts(
-            ReflectorOpts {
-                config_file: Some(path.to_path_buf()),
-                ..Default::default()
-            },
-            Default::default(),
-        )
-        .unwrap();
-
-        env::set_var(CONFIG_ENV_VAR, path);
-        let env_cfg =
-            JsonConfig::load_merge_with_opts(Default::default(), Default::default()).unwrap();
-        env::remove_var(CONFIG_ENV_VAR);
-        assert_eq!(cfg, env_cfg);
-
-        assert_eq!(
-            cfg,
-            JsonConfig {
-                auth_token: None,
-                ingest: TopLevelIngest {
-                    protocol_parent_url: Url::parse("modality-ingest://127.0.0.1:14182")
-                        .unwrap()
-                        .into(),
-                    allow_insecure_tls: false,
-                    protocol_child_port: None,
-                    timeline_attributes: TimelineAttributes {
-                        additional_timeline_attributes: vec![
-                            AttrKeyEqValuePair::from_str("ci_run=1").unwrap(),
-                            AttrKeyEqValuePair::from_str("module='linux-import'").unwrap(),
-                        ],
-                        override_timeline_attributes: Default::default(),
-                    },
-                    max_write_batch_staleness: None,
-                },
-                plugin: PluginConfig {
-                    run_id: Uuid::from_str("a1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d1")
-                        .unwrap()
-                        .into(),
-                    trace_uuid: Uuid::from_str("a1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d2")
-                        .unwrap()
-                        .into(),
-                    log_level: babeltrace2_sys::LoggingLevel::Debug.into(),
-                    import: Default::default(),
-                    lttng_live: LttngLiveConfig {
-                        retry_duration_us: 100.into(),
-                        session_not_found_action: babeltrace2_sys::SessionNotFoundAction::End
-                            .into(),
-                        url: Url::parse("net://localhost/host/ubuntu-focal/my-kernel-session")
-                            .unwrap()
-                            .into(),
-                    }
-                }
-            }
-        );
     }
 }
