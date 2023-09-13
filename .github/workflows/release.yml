@@ -38,8 +38,11 @@ jobs:
   package:
     name: Build Release Package
     timeout-minutes: 60
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-${{ matrix.ubuntu_version }}
     needs: [check]
+    strategy:
+      matrix:
+        ubuntu_version: [20.04, 22.04]
     steps:
       - name: Print version
         run: |
@@ -64,7 +67,9 @@ jobs:
         run: cargo fetch
 
       - name: Build release binaries
-        run: cargo build --release
+        run: |
+          cargo build --release
+          cp target/release/modality-json-importer target/release/modality-json-importer_${{env.RELEASE_VERSION}}+${{matrix.ubuntu_version}}
 
       - name: Create github release
         id: create_release
@@ -76,4 +81,4 @@ jobs:
           prerelease: false
           name: Release ${{ env.RELEASE_VERSION }}
           files: |
-            target/release/modality-json-importer
+            target/release/modality-json-importer_${{env.RELEASE_VERSION}}+${{matrix.ubuntu_version}}
