@@ -2,6 +2,14 @@
 
 A [Modality][modality] reflector plugin suite and ingest adapter library for JSON lines data.
 
+## Getting Started
+
+1. Write a reflector configuration file that describes how to parse the data
+2. Use the importer to import one or more JSON lines files:
+  ```
+  modality-reflector import json /path/to/data.json
+  ```
+
 ## Configuration
 
 All of the plugins can be configured through a TOML configuration file (from either the `--config` option or the `MODALITY_REFLECTOR_CONFIG` environment variable).
