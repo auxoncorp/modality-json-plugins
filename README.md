@@ -1,11 +1,11 @@
 # modality-json-plugins
 
-A [Modality][modality] reflector plugin suite and ingest adapter library for JSON lines data.
+A [Modality][modality] reflector plugin suite and ingest adapter library for JSON object literal data.
 
 ## Getting Started
 
 1. Write a reflector configuration file that describes how to parse the data
-2. Use the importer to import one or more JSON lines files:
+2. Use the importer to import one or more data files:
   ```
   modality-reflector import json /path/to/data.json
   ```
@@ -57,7 +57,7 @@ reflector configuration file, e.g. `[plugins.ingest.importers.json.metadata]`.
 
 ### Configuration Example
 
-Given the following example JSON lines data, we can write a reflector configuration
+Given the following example JSON Lines data, we can write a reflector configuration
 file to extract the [Modality timeline and event](https://docs.auxon.io/modality/concepts.html#events-and-timelines)
 attribute information.
 
